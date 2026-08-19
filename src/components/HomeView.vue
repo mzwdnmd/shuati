@@ -1,12 +1,29 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import * as storage from '../lib/storage.js'
 import { serializeExport, parseImportFile, decryptImport, stamp } from '../lib/importExport.js'
 
 const props = defineProps({
-  profile: { type: Object, required: true }
+  profile: { type: Object, required: true },
+  notice: { type: String, default: '' }
 })
-const emit = defineEmits(['start', 'manage', 'manage-profile', 'changed'])
+const emit = defineEmits(['start', 'manage', 'compose', 'manage-profile', 'changed', 'notice-done'])
+
+/* ---------------- 顶部提示 toast ---------------- */
+const toastMsg = ref('')
+let toastTimer = null
+watch(
+  () => props.notice,
+  (v) => {
+    if (!v) return
+    toastMsg.value = v
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => {
+      toastMsg.value = ''
+      emit('notice-done')
+    }, 2600)
+  }
+)
 
 const banks = computed(() => props.profile.banks || [])
 const progress = computed(() => props.profile.progress || {})
@@ -230,6 +247,7 @@ function confirmDelete() {
       </div>
       <div class="profile-actions">
         <button class="mini-btn ghost" @click="emit('manage-profile')">切换档案</button>
+        <button class="mini-btn accent" @click="emit('compose')">一句话成题</button>
         <button class="mini-btn primary" @click="openCreate">新建题库</button>
         <button class="mini-btn primary" @click="openImport">导入题库</button>
         <button class="mini-btn primary" @click="openExport">导出题库</button>
@@ -269,6 +287,11 @@ function confirmDelete() {
     </section>
 
     <footer class="home-foot">题库即文件 · 每一题都是基石</footer>
+
+    <!-- 成题成功提示 -->
+    <transition name="toast">
+      <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
+    </transition>
 
     <!-- 导出面板 -->
     <div v-if="showExport" class="modal-mask" @click.self="showExport = false">
@@ -503,6 +526,18 @@ h1 {
   color: var(--accent);
 }
 
+.mini-btn.accent {
+  background: var(--accent);
+  color: var(--bg-card);
+  border: 1px solid var(--accent);
+  font-weight: 600;
+}
+
+.mini-btn.accent:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
 /* 题库列表 */
 .bank-list {
   display: flex;
@@ -635,6 +670,33 @@ h1 {
   color: var(--ink-faint);
   font-size: 12px;
   letter-spacing: 2px;
+}
+
+/* 顶部提示 */
+.toast {
+  position: fixed;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: var(--accent);
+  color: var(--bg-card);
+  font-size: 14px;
+  letter-spacing: 2px;
+  padding: 12px 26px;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(139, 58, 46, 0.28);
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-10px);
 }
 
 /* 模态 */

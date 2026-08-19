@@ -3,13 +3,15 @@ import { ref, onMounted } from 'vue'
 import HomeView from './components/HomeView.vue'
 import QuizView from './components/QuizView.vue'
 import BankManageView from './components/BankManageView.vue'
+import OneSentenceView from './components/OneSentenceView.vue'
 import ProfileGate from './components/ProfileGate.vue'
 import * as storage from './lib/storage.js'
 
-const view = ref('gate') // gate | home | quiz | manage
+const view = ref('gate') // gate | home | quiz | manage | compose
 const profile = ref(null)
 const currentBank = ref(null)
 const manageBankId = ref(null)
+const notice = ref('')
 
 onMounted(() => {
   const meta = storage.loadMeta()
@@ -50,6 +52,19 @@ function closeManage() {
   view.value = 'home'
 }
 
+function openCompose() {
+  view.value = 'compose'
+}
+
+function onComposeDone(msg) {
+  notice.value = msg
+  view.value = 'home'
+}
+
+function onNoticeDone() {
+  notice.value = ''
+}
+
 function backHome() {
   currentBank.value = null
   view.value = 'home'
@@ -82,13 +97,22 @@ function onAnswer(correct) {
       @back="closeManage"
       @changed="onChanged"
     />
+    <OneSentenceView
+      v-else-if="view === 'compose' && profile"
+      :profile="profile"
+      @back="closeManage"
+      @done="onComposeDone"
+    />
     <HomeView
       v-else-if="profile"
       :profile="profile"
+      :notice="notice"
       @start="startQuiz"
       @manage="openManage"
+      @compose="openCompose"
       @manage-profile="openGate"
       @changed="onChanged"
+      @notice-done="onNoticeDone"
     />
   </div>
 </template>

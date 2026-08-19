@@ -12,6 +12,7 @@ const bank = computed(() => (props.profile.banks || []).find((b) => b.id === pro
 const questions = computed(() => (bank.value ? bank.value.questions : []))
 const builtin = computed(() => !!bank.value && !!bank.value.builtin)
 const letter = (i) => String.fromCharCode(65 + i)
+const segsOf = (text) => (text || '').split('____')
 
 /* ---------------- 落盘 ---------------- */
 function saveBank(nextBank) {
@@ -58,11 +59,11 @@ function saveMeta() {
 /* ---------------- 题目编辑（新增 / 编辑共用） ---------------- */
 const showQuestion = ref(false)
 const editingId = ref(null) // null 表示新增
-const qForm = ref({ question: '', options: ['', '', ''], answer: 0, explanation: '' })
+const qForm = ref({ type: 'single', question: '', options: ['', '', ''], answer: 0, explanation: '', blanks: [] })
 const qError = ref('')
 
 function openNewQuestion() {
-  qForm.value = { question: '', options: ['', '', ''], answer: 0, explanation: '' }
+  qForm.value = { type: 'single', question: '', options: ['', '', ''], answer: 0, explanation: '', blanks: [] }
   editingId.value = null
   qError.value = ''
   showQuestion.value = true
@@ -70,10 +71,12 @@ function openNewQuestion() {
 
 function openEditQuestion(q) {
   qForm.value = {
+    type: q.type === 'blank' ? 'blank' : 'single',
     question: q.question,
-    options: [...q.options],
+    options: q.options ? [...q.options] : ['', '', ''],
     answer: q.answer,
-    explanation: q.explanation || ''
+    explanation: q.explanation || '',
+    blanks: q.blanks ? [...q.blanks] : []
   }
   editingId.value = q.id
   qError.value = ''
@@ -90,7 +93,59 @@ function removeOption(i) {
   if (qForm.value.answer >= qForm.value.options.length) qForm.value.answer = 0
 }
 
+function addBlank() {
+  qForm.value.blanks.push('')
+}
+
+function removeBlank(i) {
+  if (qForm.value.blanks.length <= 1) return
+  qForm.value.blanks.splice(i, 1)
+}
+
 function saveQuestion() {
+  if (qForm.value.type === 'blank') {
+    saveBlankQuestion()
+    return
+  }
+  saveSingleQuestion()
+}
+
+function saveBlankQuestion() {
+  const question = qForm.value.question.trim()
+  if (!question) {
+    qError.value = '题干不能为空。'
+    return
+  }
+  const blankCount = (question.match(/____/g) || []).length
+  if (blankCount === 0) {
+    qError.value = '题干中需要有 ____ 占位符（每个考点一个）。'
+    return
+  }
+  const blanks = qForm.value.blanks.map((b) => b.trim())
+  if (blanks.length !== blankCount) {
+    qError.value = `题干中有 ${blankCount} 个空，但答案填了 ${blanks.length} 个，请保持一致。`
+    return
+  }
+  if (blanks.some((b) => !b)) {
+    qError.value = '答案内容不能为空，请填写或删除空答案。'
+    return
+  }
+  const qs = questions.value
+  const payload = { question, blanks, explanation: qForm.value.explanation.trim() }
+  let nextQuestions
+  if (editingId.value) {
+    nextQuestions = qs.map((q) => (q.id === editingId.value ? { ...q, ...payload } : q))
+  } else {
+    const existingIds = new Set(qs.map((q) => q.id))
+    nextQuestions = [...qs, { id: genQuestionId(existingIds), type: 'blank', ...payload }]
+  }
+  const nextBank = { ...bank.value, questions: nextQuestions }
+  if (nextBank.builtin) delete nextBank.builtin
+  saveBank(nextBank)
+  showQuestion.value = false
+}
+
+function saveSingleQuestion() {
   const question = qForm.value.question.trim()
   if (!question) {
     qError.value = '题干不能为空。'
@@ -111,19 +166,13 @@ function saveQuestion() {
     return
   }
   const qs = questions.value
+  const payload = { question, options, answer, explanation: qForm.value.explanation.trim() }
   let nextQuestions
   if (editingId.value) {
-    nextQuestions = qs.map((q) =>
-      q.id === editingId.value
-        ? { ...q, question, options, answer, explanation: qForm.value.explanation.trim() }
-        : q
-    )
+    nextQuestions = qs.map((q) => (q.id === editingId.value ? { ...q, ...payload } : q))
   } else {
     const existingIds = new Set(qs.map((q) => q.id))
-    nextQuestions = [
-      ...qs,
-      { id: genQuestionId(existingIds), question, options, answer, explanation: qForm.value.explanation.trim() }
-    ]
+    nextQuestions = [...qs, { id: genQuestionId(existingIds), type: 'single', ...payload }]
   }
   const nextBank = { ...bank.value, questions: nextQuestions }
   if (nextBank.builtin) delete nextBank.builtin // 编辑后转为自建题库
@@ -179,14 +228,31 @@ function confirmDeleteQuestion() {
             <button class="q-btn danger" @click="askDeleteQuestion(q)">删除</button>
           </span>
         </div>
-        <p class="q-text">{{ q.question }}</p>
-        <ul class="q-options">
-          <li v-for="(opt, i) in q.options" :key="i" :class="{ correct: i === q.answer }">
-            <span class="opt-letter">{{ letter(i) }}</span>
-            <span class="opt-text">{{ opt }}</span>
-            <span v-if="i === q.answer" class="opt-tag">正解</span>
-          </li>
-        </ul>
+        <!-- 填空题 -->
+        <template v-if="q.type === 'blank'">
+          <p class="q-text blank-view">
+            <template v-for="(seg, i) in segsOf(q.question)" :key="i">
+              <span>{{ seg }}</span>
+              <span v-if="i < segsOf(q.question).length - 1" class="q-blank-mark">____</span>
+            </template>
+          </p>
+          <div class="q-blanks">
+            <span v-for="(b, bi) in q.blanks" :key="bi" class="q-blank-answer">
+              {{ bi + 1 }}. {{ b }}
+            </span>
+          </div>
+        </template>
+        <!-- 单选题 -->
+        <template v-else>
+          <p class="q-text">{{ q.question }}</p>
+          <ul class="q-options">
+            <li v-for="(opt, i) in q.options" :key="i" :class="{ correct: i === q.answer }">
+              <span class="opt-letter">{{ letter(i) }}</span>
+              <span class="opt-text">{{ opt }}</span>
+              <span v-if="i === q.answer" class="opt-tag">正解</span>
+            </li>
+          </ul>
+        </template>
         <p v-if="q.explanation" class="q-explanation">
           <span class="exp-label">解析</span>{{ q.explanation }}
         </p>
@@ -223,33 +289,57 @@ function confirmDeleteQuestion() {
       <div class="modal wide">
         <h3 class="modal-title">{{ editingId ? '编辑题目' : '新增题目' }}</h3>
         <label class="field">
-          <span class="field-label">题干</span>
+          <span class="field-label">题干<span v-if="qForm.type === 'blank'" class="field-hint">（挖空处用 ____ 占位）</span></span>
           <textarea v-model="qForm.question" class="input textarea" rows="3" placeholder="请输入题目内容"></textarea>
         </label>
-        <div class="field">
-          <span class="field-label">选项（至少 2 个，标点为正确答案）</span>
+
+        <!-- 填空题：答案列表 -->
+        <div v-if="qForm.type === 'blank'" class="field">
+          <span class="field-label">每个空的答案（与题干中的 ____ 一一对应）</span>
           <div class="option-rows">
-            <div v-for="(opt, i) in qForm.options" :key="i" class="option-row">
-              <span class="opt-letter">{{ letter(i) }}</span>
-              <input v-model="qForm.options[i]" class="input" :placeholder="'选项 ' + letter(i)" />
+            <div v-for="(b, i) in qForm.blanks" :key="i" class="option-row">
+              <span class="opt-letter">{{ i + 1 }}</span>
+              <input v-model="qForm.blanks[i]" class="input" :placeholder="'第 ' + (i + 1) + ' 空答案'" />
               <button
                 class="row-del"
-                title="删除此选项"
-                :disabled="qForm.options.length <= 2"
-                @click="removeOption(i)"
+                title="删除此答案"
+                :disabled="qForm.blanks.length <= 1"
+                @click="removeBlank(i)"
               >
                 删
               </button>
             </div>
           </div>
-          <button class="add-opt" @click="addOption">＋ 添加选项</button>
+          <button class="add-opt" @click="addBlank">＋ 添加答案</button>
         </div>
-        <label class="field">
-          <span class="field-label">正确答案</span>
-          <select v-model="qForm.answer" class="input select">
-            <option v-for="(opt, i) in qForm.options" :key="i" :value="i">选项 {{ letter(i) }}</option>
-          </select>
-        </label>
+
+        <!-- 单选题：选项列表 -->
+        <template v-else>
+          <div class="field">
+            <span class="field-label">选项（至少 2 个，标点为正确答案）</span>
+            <div class="option-rows">
+              <div v-for="(opt, i) in qForm.options" :key="i" class="option-row">
+                <span class="opt-letter">{{ letter(i) }}</span>
+                <input v-model="qForm.options[i]" class="input" :placeholder="'选项 ' + letter(i)" />
+                <button
+                  class="row-del"
+                  title="删除此选项"
+                  :disabled="qForm.options.length <= 2"
+                  @click="removeOption(i)"
+                >
+                  删
+                </button>
+              </div>
+            </div>
+            <button class="add-opt" @click="addOption">＋ 添加选项</button>
+          </div>
+          <label class="field">
+            <span class="field-label">正确答案</span>
+            <select v-model="qForm.answer" class="input select">
+              <option v-for="(opt, i) in qForm.options" :key="i" :value="i">选项 {{ letter(i) }}</option>
+            </select>
+          </label>
+        </template>
         <label class="field">
           <span class="field-label">解析（可选）</span>
           <textarea v-model="qForm.explanation" class="input textarea" rows="2" placeholder="答案解析或备注"></textarea>
@@ -420,6 +510,36 @@ function confirmDeleteQuestion() {
   margin-bottom: 12px;
 }
 
+.blank-view {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  row-gap: 4px;
+}
+
+.q-blank-mark {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 1px;
+  margin: 0 2px;
+}
+
+.q-blanks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 4px;
+}
+
+.q-blank-answer {
+  font-size: 13px;
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-radius: 8px;
+  padding: 3px 12px;
+  letter-spacing: 0.5px;
+}
+
 .q-options {
   list-style: none;
   display: flex;
@@ -561,6 +681,12 @@ function confirmDeleteQuestion() {
   color: var(--ink-soft);
   letter-spacing: 1px;
   margin-bottom: 6px;
+}
+
+.field-hint {
+  color: var(--ink-faint);
+  font-size: 12px;
+  letter-spacing: 0.5px;
 }
 
 .input {

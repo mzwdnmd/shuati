@@ -11,17 +11,43 @@ const picked = ref(null)      // 已选答案索引
 const answered = ref(false)   // 本题是否已作答
 const score = ref(0)
 const finished = ref(false)
+const lastCorrect = ref(null) // 本题是否答对（单选/填空共用）
+const blankInputs = ref([])   // 填空输入
+const blankError = ref('')
 
 const questions = computed(() => props.bank.questions)
 const total = computed(() => questions.value.length)
 const current = computed(() => questions.value[idx.value])
+const segs = computed(() => (current.value.question || '').split('____'))
+
+const normalize = (s) => (s || '').trim().toLowerCase()
 
 function choose(i) {
   if (answered.value) return
   picked.value = i
   answered.value = true
-  if (i === current.value.answer) score.value++
-  emit('answer', i === current.value.answer)
+  lastCorrect.value = i === current.value.answer
+  if (lastCorrect.value) score.value++
+  emit('answer', lastCorrect.value)
+}
+
+function submitBlank() {
+  if (answered.value) return
+  if (blankInputs.value.some((v) => !normalize(v))) {
+    blankError.value = '请填写所有空后再交卷。'
+    return
+  }
+  blankError.value = ''
+  const correct = current.value.blanks.every((b, i) => normalize(blankInputs.value[i]) === normalize(b))
+  answered.value = true
+  lastCorrect.value = correct
+  if (correct) score.value++
+  emit('answer', correct)
+}
+
+function blankClass(i) {
+  if (!answered.value) return ''
+  return normalize(blankInputs.value[i]) === normalize(current.value.blanks[i]) ? 'correct' : 'wrong'
 }
 
 function next() {
@@ -32,14 +58,20 @@ function next() {
   idx.value++
   picked.value = null
   answered.value = false
+  lastCorrect.value = null
+  blankError.value = ''
+  blankInputs.value = current.value.blanks ? current.value.blanks.map(() => '') : []
 }
 
 function restart() {
   idx.value = 0
   picked.value = null
   answered.value = false
+  lastCorrect.value = null
+  blankError.value = ''
   score.value = 0
   finished.value = false
+  blankInputs.value = current.value.blanks ? current.value.blanks.map(() => '') : []
 }
 
 function optionClass(i) {
@@ -78,9 +110,27 @@ const rate = computed(() => Math.round((score.value / total.value) * 100))
         <div class="progress-fill" :style="{ width: ((idx + 1) / total * 100) + '%' }"></div>
       </div>
 
-      <h2 class="question">{{ current.question }}</h2>
+      <!-- 填空题型 -->
+      <template v-if="current.type === 'blank'">
+        <h2 class="question blank-question">
+          <template v-for="(seg, i) in segs" :key="i">
+            <span>{{ seg }}</span>
+            <input
+              v-if="i < segs.length - 1"
+              v-model="blankInputs[i]"
+              class="blank-input"
+              :class="answered ? blankClass(i) : ''"
+              :disabled="answered"
+              :placeholder="answered ? '' : '填空'"
+            />
+          </template>
+        </h2>
+        <p v-if="blankError" class="blank-error">{{ blankError }}</p>
+        <button v-if="!answered" class="btn primary submit-btn" @click="submitBlank">交卷</button>
+      </template>
 
-      <div class="options">
+      <!-- 单选题型 -->
+      <div v-else class="options">
         <button
           v-for="(opt, i) in current.options"
           :key="i"
@@ -97,8 +147,13 @@ const rate = computed(() => Math.round((score.value / total.value) * 100))
 
       <transition name="fade">
         <div v-if="answered" class="explanation">
-          <p class="exp-label">{{ picked === current.answer ? '答对了' : '记下这处' }}</p>
-          <p class="exp-text">{{ current.explanation }}</p>
+          <p class="exp-label">{{ lastCorrect ? '答对了' : '记下这处' }}</p>
+          <div v-if="current.type === 'blank'" class="blank-answers">
+            <span v-for="(b, i) in current.blanks" :key="i" class="blank-answer">
+              {{ i + 1 }}. {{ b }}
+            </span>
+          </div>
+          <p v-if="current.explanation" class="exp-text">{{ current.explanation }}</p>
           <button class="btn primary next-btn" @click="next">
             {{ idx + 1 >= total ? '查看成绩' : '下一题' }}
           </button>
@@ -170,6 +225,72 @@ const rate = computed(() => Math.round((score.value / total.value) * 100))
   line-height: 1.7;
   letter-spacing: 0.5px;
   margin-bottom: 26px;
+}
+
+/* 填空题型 */
+.blank-question {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 6px;
+}
+
+.blank-input {
+  width: 96px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--accent-soft);
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: center;
+  outline: none;
+  margin: 0 6px;
+  padding: 0 6px 2px;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.blank-input:focus {
+  border-bottom-color: var(--accent);
+}
+
+.blank-input.correct {
+  border-bottom-color: var(--ok);
+  color: var(--ok);
+}
+
+.blank-input.wrong {
+  border-bottom-color: var(--bad);
+  color: var(--bad);
+}
+
+.blank-error {
+  font-size: 13px;
+  color: var(--bad);
+  margin: -14px 0 14px;
+}
+
+.submit-btn {
+  margin-top: 6px;
+  width: 100%;
+}
+
+.blank-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-bottom: 10px;
+}
+
+.blank-answer {
+  font-size: 14px;
+  color: var(--ok);
+  letter-spacing: 0.5px;
+  background: var(--ok-bg);
+  border-radius: 8px;
+  padding: 4px 12px;
 }
 
 .options {
