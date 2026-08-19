@@ -65,7 +65,7 @@ function doExport() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `观微题库-${props.profile.nickname}-${stamp()}.json`
+  a.download = `日课题库-${props.profile.nickname}-${stamp()}.json`
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -233,8 +233,8 @@ function confirmDelete() {
 <template>
   <main class="home">
     <header class="hero">
-      <div class="seal">观微</div>
-      <h1>术数自习</h1>
+      <div class="seal">日课</div>
+      <h1>每日一课</h1>
       <p class="subtitle">以手观心，以题养学。择一卷而习之。</p>
     </header>
 

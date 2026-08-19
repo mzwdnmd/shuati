@@ -9,7 +9,7 @@ AIGC:
     ReservedCode2: OPOLHjvR24IWqDE68NVPEjuen2MPrhmhAHIei54Siu/mK1aQu7AHEhIjnkuPxWvTHWmUvFViNX+Na4acaWbZAAy2wpoBCs6fckQuv5/gGKnSt4WiV5+n2rfr8iQO6s41ar4rT7oLG+mq3Bb/jO8ywZvot5ciYp/MhOsJjizXbffi8o/wCAFbdapd/ko=
 ---
 
-# 观微 · 术数自习
+# 日课
 
 一个好看优雅、可自定义题库的刷题工具。术数（手相、堪舆等）内容的第一块基石。
 
