@@ -4,7 +4,7 @@ import { ref, computed } from 'vue'
 const props = defineProps({
   bank: { type: Object, required: true }
 })
-const emit = defineEmits(['back'])
+const emit = defineEmits(['back', 'answer'])
 
 const idx = ref(0)
 const picked = ref(null)      // 已选答案索引
@@ -21,6 +21,7 @@ function choose(i) {
   picked.value = i
   answered.value = true
   if (i === current.value.answer) score.value++
+  emit('answer', i === current.value.answer)
 }
 
 function next() {
@@ -72,7 +73,7 @@ const rate = computed(() => Math.round((score.value / total.value) * 100))
     </section>
 
     <!-- 刷题页 -->
-    <section v-else class="question-card" :key="current.id">
+    <section v-else class="question-card" :key="'q-' + idx">
       <div class="progress-track">
         <div class="progress-fill" :style="{ width: ((idx + 1) / total * 100) + '%' }"></div>
       </div>
