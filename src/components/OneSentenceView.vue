@@ -109,6 +109,158 @@ function hollow() {
 /* ---------------- 预览 ---------------- */
 const segs = computed(() => sentence.value.split(BLANK))
 
+/* ---------------- 模式切换 ---------------- */
+const mode = ref('single') // single | batch
+
+/* ---------------- 批量成题 ---------------- */
+const batchText = ref('')
+const batchItems = ref([])
+const batchErr = ref('')
+
+/** 剥离常见行首编号：① ② …、一、二、…、1. 1、 1． (1) 等 */
+function stripNumber(line) {
+  let s = line
+  s = s.replace(/^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/, '')
+  s = s.replace(/^[一二三四五六七八九十百]+[、.．]/, '')
+  s = s.replace(/^\s*[（(]?\d+[）)．.]?[、.．]?\s*/, '')
+  return s.trim()
+}
+
+/**
+ * 默认挖空规则：
+ * - 含「是」：挖掉「是」后面第一个词块（如「太阳是恒星」→ 挖「恒星」）
+ * - 否则：挖掉句子最后一个词块（按标点/空格切分）；整句仅一个词块时挖最后一个字
+ */
+function autoBlank(line) {
+  const isIdx = line.indexOf('是')
+  let pick = null
+  let start = 0
+  if (isIdx >= 0) {
+    const after = line.slice(isIdx + 1)
+    const m = after.match(/[^\s，。！？、；：,.!?;:]+/)
+    if (m) {
+      pick = m[0]
+      start = isIdx + 1 + m.index
+    }
+  }
+  if (!pick) {
+    const m = line.match(/[^\s，。！？、；：,.!?;:]+$/)
+    if (m) {
+      if (m[0] === line && line.length > 2) {
+        pick = line.slice(-1)
+        start = line.length - 1
+      } else {
+        pick = m[0]
+        start = m.index
+      }
+    }
+  }
+  if (!pick || pick === line) return null
+  return {
+    question: line.slice(0, start) + '____' + line.slice(start + pick.length),
+    blanks: [pick]
+  }
+}
+
+function generateBatch() {
+  batchErr.value = ''
+  if (!batchText.value.trim()) {
+    batchErr.value = '请先粘贴文本。'
+    return
+  }
+  const items = []
+  for (const raw of batchText.value.split('\n')) {
+    const line = stripNumber(raw)
+    if (!line) continue
+    const auto = autoBlank(line)
+    items.push({
+      original: line,
+      sentence: auto ? auto.question : line,
+      blanks: auto ? auto.blanks : [],
+      explanation: '',
+      expanded: false,
+      selValid: false,
+      selStart: 0,
+      selEnd: 0,
+      selText: ''
+    })
+  }
+  if (items.length === 0) {
+    batchErr.value = '未能从文本中识别出句子。'
+    return
+  }
+  batchItems.value = items
+}
+
+/* ---- 批量题目微调 ---- */
+function itemSel(item, e) {
+  const el = e.target
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  if (end <= start) {
+    item.selValid = false
+    return
+  }
+  const text = item.sentence.slice(start, end)
+  if (!text.trim() || text.includes('____')) {
+    item.selValid = false
+    return
+  }
+  item.selStart = start
+  item.selEnd = end
+  item.selText = text.trim()
+  item.selValid = true
+}
+
+function itemHollow(item) {
+  if (!item.selValid) {
+    batchErr.value = '请先划选要挖空的词。'
+    return
+  }
+  const s = item.sentence
+  item.sentence = s.slice(0, item.selStart) + '____' + s.slice(item.selEnd)
+  item.blanks.push(item.selText)
+  item.selValid = false
+  batchErr.value = ''
+}
+
+function itemUndo(item) {
+  const idx = item.sentence.lastIndexOf('____')
+  if (idx < 0) return
+  const last = item.blanks.pop()
+  if (last) item.sentence = item.sentence.slice(0, idx) + last + item.sentence.slice(idx + 4)
+}
+
+function itemReAuto(item) {
+  const auto = autoBlank(item.sentence)
+  if (!auto) {
+    batchErr.value = '无法自动挖空，请手动划选。'
+    return
+  }
+  item.sentence = auto.question
+  item.blanks = auto.blanks
+  item.selValid = false
+  batchErr.value = ''
+}
+
+function itemAddBlank(item) {
+  item.blanks.push('')
+}
+
+function itemRemoveBlank(item, i) {
+  if (item.blanks.length > 1) item.blanks.splice(i, 1)
+}
+
+function removeItem(item) {
+  batchItems.value = batchItems.value.filter((x) => x !== item)
+}
+
+function resetBatch() {
+  batchItems.value = []
+  batchText.value = ''
+  batchErr.value = ''
+}
+
 /* ---------------- 保存 ---------------- */
 const targetMode = ref('existing') // existing | new
 const targetBankId = ref('')
@@ -148,31 +300,69 @@ function save() {
     blanks: blanks.value.map((b) => b.trim()),
     explanation: explanation.value.trim()
   }
+  saveToBank([question], '已保存 1 道题', err)
+}
+
+/* ---- 批量保存 ---- */
+function saveBatch() {
+  batchErr.value = ''
+  if (batchItems.value.length === 0) {
+    batchErr.value = '请先粘贴并生成题目。'
+    return
+  }
+  const qs = []
+  for (const item of batchItems.value) {
+    const s = item.sentence.trim()
+    if (!s) {
+      batchErr.value = '存在空句子，请删除该句或补全。'
+      return
+    }
+    const n = (s.match(/____/g) || []).length
+    if (n === 0) {
+      batchErr.value = `「${s}」尚未挖空，请展开微调。`
+      return
+    }
+    const blanks = item.blanks.map((b) => b.trim())
+    if (blanks.length !== n) {
+      batchErr.value = `「${s}」有 ${n} 个挖空，但答案 ${blanks.length} 个，请保持一致。`
+      return
+    }
+    if (blanks.some((b) => !b)) {
+      batchErr.value = `「${s}」存在空答案，请填写或删除。`
+      return
+    }
+    qs.push({ id: genQuestionId(), type: 'blank', question: s, blanks, explanation: item.explanation.trim() })
+  }
+  saveToBank(qs, `已保存 ${qs.length} 道题`, batchErr)
+}
+
+/** 单句/批量共用的落盘逻辑：questions 为待保存题目数组 */
+function saveToBank(questions, okMsg, errRef) {
   if (targetMode.value === 'new') {
     const name = newName.value.trim()
     if (!name) {
-      err.value = '请输入新题库名称。'
+      errRef.value = '请输入新题库名称。'
       return
     }
     if (banks.value.some((b) => b.name === name)) {
-      err.value = `已有同名题库「${name}」，请换一个名称。`
+      errRef.value = `已有同名题库「${name}」，请换一个名称。`
       return
     }
-    const bank = { id: genBankId(), name, description: '', questions: [question] }
+    const bank = { id: genBankId(), name, description: '', questions }
     storage.updateBanks(props.profile.id, [...banks.value, bank])
-    emit('done', `已保存到新题库「${name}」`)
+    emit('done', `${okMsg}到新题库「${name}」`)
   } else {
     if (!targetBankId.value) {
-      err.value = '请选择题库。'
+      errRef.value = '请选择题库。'
       return
     }
     const target = banks.value.find((b) => b.id === targetBankId.value)
     if (!target) return
-    const nextBank = { ...target, questions: [...target.questions, question] }
+    const nextBank = { ...target, questions: [...target.questions, ...questions] }
     if (nextBank.builtin) delete nextBank.builtin // 向内置题库添加题目后视为自建
     const next = banks.value.map((b) => (b.id === nextBank.id ? nextBank : b))
     storage.updateBanks(props.profile.id, next)
-    emit('done', `已保存到题库「${nextBank.name}」`)
+    emit('done', `${okMsg}到题库「${nextBank.name}」`)
   }
 }
 </script>
@@ -187,7 +377,12 @@ function save() {
       </div>
     </header>
 
-    <section class="compose-card">
+    <div class="mode-tabs">
+      <button class="mode-tab" :class="{ active: mode === 'single' }" @click="mode = 'single'">单句成题</button>
+      <button class="mode-tab" :class="{ active: mode === 'batch' }" @click="mode = 'batch'">批量成题</button>
+    </div>
+
+    <section v-if="mode === 'single'" class="compose-card">
       <label class="field">
         <span class="field-label">① 输入句子</span>
         <textarea
@@ -243,8 +438,93 @@ function save() {
       </label>
     </section>
 
+    <section v-else class="compose-card">
+      <label class="field">
+        <span class="field-label">① 粘贴多行知识点</span>
+        <textarea
+          v-model="batchText"
+          class="input textarea"
+          rows="6"
+          placeholder="每行一句，可带编号：&#10;1. 肾主水&#10;2、肝主目&#10;一、心主血脉&#10;① 肺主气&#10;或直接每行一句"
+        ></textarea>
+      </label>
+      <div class="select-bar">
+        <button class="btn primary small" @click="generateBatch">生成题目</button>
+        <span class="spacer"></span>
+        <button class="btn ghost small" :disabled="batchItems.length === 0" @click="resetBatch">整批重置</button>
+      </div>
+      <p class="sel-hint batch-hint">
+        自动剥离行首编号（1. 1、① 一、等），空行忽略；含「是」的句子挖「是」后第一个词块，否则挖句尾词块。生成后可逐句微调。
+      </p>
+      <p v-if="batchErr" class="form-error">{{ batchErr }}</p>
+
+      <div v-if="batchItems.length" class="batch-list">
+        <article v-for="(item, i) in batchItems" :key="i" class="batch-item" :class="{ expanded: item.expanded }">
+          <div class="batch-item-head" @click="item.expanded = !item.expanded">
+            <span class="batch-no">{{ i + 1 }}</span>
+            <div class="batch-main">
+              <p class="batch-original">{{ item.original }}</p>
+              <p class="batch-question">
+                <template v-for="(seg, si) in item.sentence.split('____')" :key="si">
+                  <span>{{ seg }}</span>
+                  <span v-if="si < item.sentence.split('____').length - 1" class="blank-mark">____</span>
+                </template>
+                <span v-if="!item.sentence.includes('____')" class="batch-warn">（未挖空，请展开微调）</span>
+              </p>
+            </div>
+            <span class="batch-toggle">{{ item.expanded ? '收起' : '微调' }}</span>
+            <button class="row-del batch-del" @click.stop="removeItem(item)">删</button>
+          </div>
+          <div v-if="item.expanded" class="batch-edit">
+            <label class="field">
+              <span class="field-label">句子（可修改）</span>
+              <textarea
+                v-model="item.sentence"
+                class="input textarea"
+                rows="2"
+                placeholder="修改句子，或划选句中要考的词后点「挖空」"
+                @select="itemSel(item, $event)"
+                @mouseup="itemSel(item, $event)"
+                @keyup="itemSel(item, $event)"
+              ></textarea>
+            </label>
+            <div class="select-bar">
+              <template v-if="item.selValid">
+                <span class="sel-tip">已选中「{{ item.selText }}」</span>
+                <button class="btn primary small" @click="itemHollow(item)">挖空</button>
+              </template>
+              <span v-else class="sel-hint">划选句中要考的词后点「挖空」</span>
+              <span class="spacer"></span>
+              <button class="btn ghost small" :disabled="!item.sentence.includes('____')" @click="itemUndo(item)">撤销一空</button>
+              <button class="btn ghost small" @click="itemReAuto(item)">重新自动</button>
+            </div>
+            <div class="field">
+              <span class="field-label">各空答案（与 ____ 一一对应）</span>
+              <div class="option-rows">
+                <div v-for="(b, bi) in item.blanks" :key="bi" class="option-row">
+                  <span class="opt-letter">{{ bi + 1 }}</span>
+                  <input v-model="item.blanks[bi]" class="input" :placeholder="'第 ' + (bi + 1) + ' 空答案'" />
+                  <button class="row-del" :disabled="item.blanks.length <= 1" @click="itemRemoveBlank(item, bi)">删</button>
+                </div>
+              </div>
+              <button class="add-opt" @click="itemAddBlank(item)">＋ 添加答案</button>
+            </div>
+            <label class="field">
+              <span class="field-label">解析（可选）</span>
+              <textarea
+                v-model="item.explanation"
+                class="input textarea"
+                rows="2"
+                placeholder="本题解析或备注"
+              ></textarea>
+            </label>
+          </div>
+        </article>
+      </div>
+    </section>
+
     <section class="save-card">
-      <h3 class="save-title">③ 保存到</h3>
+      <h3 class="save-title">{{ mode === 'single' ? '③ 保存到' : '② 保存 ' + batchItems.length + ' 道题到' }}</h3>
       <div class="save-mode">
         <label class="radio">
           <input v-model="targetMode" type="radio" value="existing" /> 已有题库
@@ -264,7 +544,11 @@ function save() {
       <template v-else>
         <input v-model="newName" class="input" maxlength="40" placeholder="新题库名称，如：地理常识" />
       </template>
-      <button class="btn primary save-btn" :disabled="historyIdx <= 0" @click="save">保存题目</button>
+      <button
+        class="btn primary save-btn"
+        :disabled="(mode === 'single' && historyIdx <= 0) || (mode === 'batch' && batchItems.length === 0)"
+        @click="mode === 'single' ? save() : saveBatch()"
+      >{{ mode === 'single' ? '保存题目' : '整批保存' }}</button>
     </section>
   </main>
 </template>
@@ -512,5 +796,172 @@ function save() {
 .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* ---- 模式切换 ---- */
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mode-tab {
+  flex: 1;
+  padding: 10px 0;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 15px;
+  letter-spacing: 3px;
+  transition: all 0.2s;
+}
+
+.mode-tab:hover:not(.active) {
+  border-color: var(--accent-soft);
+  color: var(--accent);
+}
+
+.mode-tab.active {
+  background: var(--accent);
+  color: var(--bg-card);
+  border-color: var(--accent);
+}
+
+/* ---- 批量成题 ---- */
+.batch-hint {
+  margin-top: 8px;
+  line-height: 1.8;
+}
+
+.batch-list {
+  margin-top: 18px;
+}
+
+.batch-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.batch-item-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.batch-item-head:hover {
+  background: var(--bg);
+}
+
+.batch-no {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-card);
+  font-size: 13px;
+}
+
+.batch-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.batch-original {
+  font-size: 13px;
+  color: var(--ink-faint);
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.batch-question {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.batch-warn {
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.batch-toggle {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+  letter-spacing: 1px;
+}
+
+.batch-del {
+  flex-shrink: 0;
+}
+
+.batch-edit {
+  padding: 14px 16px 4px;
+  border-top: 1px dashed var(--line);
+  background: var(--bg);
+}
+
+.option-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.opt-letter {
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.row-del {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.row-del:hover:not(:disabled) {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.row-del:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.add-opt {
+  margin-top: 8px;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.add-opt:hover {
+  color: var(--accent-soft);
 }
 </style>
