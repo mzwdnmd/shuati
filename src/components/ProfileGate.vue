@@ -93,7 +93,7 @@ function submitVerify() {
     <!-- 创建档案 -->
     <section v-if="mode === 'create'" class="gate-card">
       <div class="gate-seal">立</div>
-      <h1 class="gate-title">初入日课</h1>
+      <h1 class="gate-title">初入观微</h1>
       <p class="gate-sub">设立你的书斋，题库与进度将在此名下独立存放。</p>
 
       <form class="gate-form" @submit.prevent="submitCreate">

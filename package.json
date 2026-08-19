@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "日课——优雅的自定义刷题工具",
+  "description": "观微——优雅的自定义刷题工具",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

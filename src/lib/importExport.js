@@ -7,7 +7,7 @@ import { encryptJSON, decryptJSON } from './crypto.js'
  *   "format": "shuati-bank",
  *   "version": 1,
  *   "exportedAt": "...",
- *   "app": "日课",
+ *   "app": "观微",
  *   "encrypted": false,
  *   "banks": [ ... ]
  * }
@@ -29,7 +29,7 @@ export function serializeExport(banks, password) {
     format: EXPORT_FORMAT,
     version: EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
-    app: '日课',
+    app: '观微',
     encrypted: false,
     banks
   }
