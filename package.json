@@ -1,0 +1,19 @@
+{
+  "name": "shuati",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "观微 · 术数自习——优雅的自定义刷题工具",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.0.7"
+  }
+}
