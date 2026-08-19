@@ -2,12 +2,14 @@
 import { ref, onMounted } from 'vue'
 import HomeView from './components/HomeView.vue'
 import QuizView from './components/QuizView.vue'
+import BankManageView from './components/BankManageView.vue'
 import ProfileGate from './components/ProfileGate.vue'
 import * as storage from './lib/storage.js'
 
-const view = ref('gate') // gate | home | quiz
+const view = ref('gate') // gate | home | quiz | manage
 const profile = ref(null)
 const currentBank = ref(null)
+const manageBankId = ref(null)
 
 onMounted(() => {
   const meta = storage.loadMeta()
@@ -25,10 +27,6 @@ function onProfileReady(p) {
   view.value = 'home'
 }
 
-function openManage() {
-  view.value = 'gate'
-}
-
 function cancelGate() {
   if (profile.value) view.value = 'home'
 }
@@ -36,6 +34,20 @@ function cancelGate() {
 function startQuiz(bank) {
   currentBank.value = bank
   view.value = 'quiz'
+}
+
+function openManage(bank) {
+  manageBankId.value = bank.id
+  view.value = 'manage'
+}
+
+function openGate() {
+  view.value = 'gate'
+}
+
+function closeManage() {
+  manageBankId.value = null
+  view.value = 'home'
 }
 
 function backHome() {
@@ -63,11 +75,19 @@ function onAnswer(correct) {
       @cancel="cancelGate"
     />
     <QuizView v-else-if="view === 'quiz'" :bank="currentBank" @back="backHome" @answer="onAnswer" />
+    <BankManageView
+      v-else-if="view === 'manage' && profile && manageBankId"
+      :profile="profile"
+      :bank-id="manageBankId"
+      @back="closeManage"
+      @changed="onChanged"
+    />
     <HomeView
       v-else-if="profile"
       :profile="profile"
       @start="startQuiz"
-      @manage-profile="openManage"
+      @manage="openManage"
+      @manage-profile="openGate"
       @changed="onChanged"
     />
   </div>

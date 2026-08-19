@@ -6,13 +6,21 @@ import { serializeExport, parseImportFile, decryptImport, stamp } from '../lib/i
 const props = defineProps({
   profile: { type: Object, required: true }
 })
-const emit = defineEmits(['start', 'manage-profile', 'changed'])
+const emit = defineEmits(['start', 'manage', 'manage-profile', 'changed'])
 
 const banks = computed(() => props.profile.banks || [])
 const progress = computed(() => props.profile.progress || {})
 
 function bankProgress(bankId) {
   return progress.value[bankId] || null
+}
+
+function onCardClick(bank) {
+  if (!bank.questions || bank.questions.length === 0) {
+    emit('manage', bank) // 空题库直接进入管理页补题
+    return
+  }
+  emit('start', bank)
 }
 
 /* ---------------- 导出 ---------------- */
@@ -154,6 +162,41 @@ function doImport(toAdd, toReplace, skipped) {
   importStep.value = 'done'
 }
 
+/* ---------------- 新建题库 ---------------- */
+const showCreate = ref(false)
+const createName = ref('')
+const createDesc = ref('')
+const createError = ref('')
+
+function openCreate() {
+  createName.value = ''
+  createDesc.value = ''
+  createError.value = ''
+  showCreate.value = true
+}
+
+function confirmCreate() {
+  const name = createName.value.trim()
+  if (!name) {
+    createError.value = '题库名称不能为空。'
+    return
+  }
+  if (banks.value.some((b) => b.name === name)) {
+    createError.value = `已有同名题库「${name}」，请换一个名称。`
+    return
+  }
+  const bank = {
+    id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    name,
+    description: createDesc.value.trim(),
+    questions: []
+  }
+  storage.updateBanks(props.profile.id, [...banks.value, bank])
+  emit('changed')
+  showCreate.value = false
+  emit('manage', bank) // 创建后直接进入管理页补题
+}
+
 /* ---------------- 删除题库 ---------------- */
 const deleteTarget = ref(null)
 
@@ -187,6 +230,7 @@ function confirmDelete() {
       </div>
       <div class="profile-actions">
         <button class="mini-btn ghost" @click="emit('manage-profile')">切换档案</button>
+        <button class="mini-btn primary" @click="openCreate">新建题库</button>
         <button class="mini-btn primary" @click="openImport">导入题库</button>
         <button class="mini-btn primary" @click="openExport">导出题库</button>
       </div>
@@ -198,7 +242,7 @@ function confirmDelete() {
         v-for="bank in banks"
         :key="bank.id"
         class="bank-card"
-        @click="emit('start', bank)"
+        @click="onCardClick(bank)"
       >
         <div class="bank-head">
           <span class="bank-name">
@@ -214,13 +258,14 @@ function confirmDelete() {
           </span>
           <span v-else class="bank-progress">尚未开卷</span>
           <span class="bank-ops">
+            <span class="bank-manage" title="查看与管理题目" @click.stop="emit('manage', bank)">管理</span>
             <span class="bank-del" title="删除题库" @click.stop="askDelete(bank)">删除</span>
             <span class="bank-cta">开始研习 →</span>
           </span>
         </div>
       </button>
 
-      <p v-if="banks.length === 0" class="empty-tip">书斋空空。可导入题库，或切换档案。</p>
+      <p v-if="banks.length === 0" class="empty-tip">书斋空空。可新建题库、导入题库，或切换档案。</p>
     </section>
 
     <footer class="home-foot">题库即文件 · 每一题都是基石</footer>
@@ -313,6 +358,27 @@ function confirmDelete() {
             <button class="btn primary" @click="showImport = false">完成</button>
           </div>
         </template>
+      </div>
+    </div>
+
+    <!-- 新建题库 -->
+    <div v-if="showCreate" class="modal-mask" @click.self="showCreate = false">
+      <div class="modal">
+        <h3 class="modal-title">新建题库</h3>
+        <p class="modal-desc">新建一个空白题库，创建后可进入管理页逐题录入。</p>
+        <label class="field">
+          <span class="field-label">题库名称</span>
+          <input v-model="createName" class="input" maxlength="40" placeholder="给题库起个名字" />
+        </label>
+        <label class="field">
+          <span class="field-label">简介（可选）</span>
+          <input v-model="createDesc" class="input" maxlength="80" placeholder="一句话介绍本卷" />
+        </label>
+        <p v-if="createError" class="modal-error">{{ createError }}</p>
+        <div class="modal-actions">
+          <button class="btn ghost" @click="showCreate = false">取消</button>
+          <button class="btn primary" @click="confirmCreate">创建并录入</button>
+        </div>
       </div>
     </div>
 
@@ -518,6 +584,21 @@ h1 {
   font-size: 13px;
   color: var(--accent);
   letter-spacing: 1px;
+}
+
+.bank-manage {
+  font-size: 12px;
+  color: var(--accent);
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  padding: 2px 10px;
+  margin-right: 8px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.bank-manage:hover {
+  background: var(--accent);
+  color: var(--bg-card);
 }
 
 .bank-del {
